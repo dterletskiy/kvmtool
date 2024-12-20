@@ -10,6 +10,7 @@
 struct kvm;
 static inline void kvm__arch_read_kernel_header(struct kvm *kvm, int fd) {}
 static inline void kvm__arch_enable_mte(struct kvm *kvm) {}
+static inline void kvm__arch_set_counter_offset(struct kvm *kvm) {}
 
 #define MAX_PAGE_SIZE	SZ_4K
 

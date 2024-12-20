@@ -23,7 +23,14 @@ int sve_vl_parser(const struct option *opt, const char *arg, int unset);
 			" stolen time"),				\
 	OPT_CALLBACK('\0', "sve-max-vl", NULL, "vector length",		\
 		     "Specify the max SVE vector length (in bits) for "	\
-		     "all vCPUs", sve_vl_parser, kvm),
+		     "all vCPUs", sve_vl_parser, kvm),			\
+	OPT_U64('\0', "counter-offset", &(cfg)->counter_offset,		\
+			"Specify the counter offset, defaulting to 0"),	\
+	OPT_BOOLEAN('\0', "nested", &(cfg)->nested_virt,		\
+			"Create guest with (nested) virt"),		\
+	OPT_BOOLEAN('\0', "e2h0", &(cfg)->e2h0,				\
+			"Create guest without VHE support"),
+
 #include "arm-common/kvm-config-arch.h"
 
 #endif /* KVM__KVM_CONFIG_ARCH_H */

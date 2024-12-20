@@ -29,6 +29,31 @@ static __u64 __core_reg_id(__u64 offset)
 
 #define ARM64_CORE_REG(x) __core_reg_id(KVM_REG_ARM_CORE_REG(x))
 
+static u64 get_one_reg_u64(struct kvm_cpu *vcpu, u64 id)
+{
+	u64 val;
+	struct kvm_one_reg reg = {
+		.id	= id,
+		.addr	= (u64)&val,
+	};
+
+	if (ioctl(vcpu->vcpu_fd, KVM_GET_ONE_REG, &reg) < 0)
+		die("KVM_GET_ONE_REG failed %llx vcpu%ld", id, vcpu->cpu_id);
+
+	return val;
+}
+
+static void set_one_reg_u64(struct kvm_cpu *vcpu, u64 id, u64 val)
+{
+	struct kvm_one_reg reg = {
+		.id	= id,
+		.addr	= (u64)&val,
+	};
+
+	if (ioctl(vcpu->vcpu_fd, KVM_SET_ONE_REG, &reg) < 0)
+		die("KVM_SET_ONE_REG failed %llx vcpu%ld", id, vcpu->cpu_id);
+}
+
 unsigned long kvm_cpu__get_vcpu_mpidr(struct kvm_cpu *vcpu)
 {
 	struct kvm_one_reg reg;
@@ -94,7 +119,11 @@ static void reset_vcpu_aarch64(struct kvm_cpu *vcpu)
 	reg.addr = (u64)&data;
 
 	/* pstate = all interrupts masked */
-	data	= PSR_D_BIT | PSR_A_BIT | PSR_I_BIT | PSR_F_BIT | PSR_MODE_EL1h;
+	data	= PSR_D_BIT | PSR_A_BIT | PSR_I_BIT | PSR_F_BIT;
+	if (vcpu->kvm->cfg.arch.nested_virt)
+		data |= PSR_MODE_EL2h;
+	else
+		data |= PSR_MODE_EL1h;
 	reg.id	= ARM64_CORE_REG(regs.pstate);
 	if (ioctl(vcpu->vcpu_fd, KVM_SET_ONE_REG, &reg) < 0)
 		die_perror("KVM_SET_ONE_REG failed (spsr[EL1])");
@@ -141,6 +170,12 @@ void kvm_cpu__select_features(struct kvm *kvm, struct kvm_vcpu_init *init)
 		if (!kvm__supports_extension(kvm, KVM_CAP_ARM_PMU_V3))
 			die("PMUv3 is not supported");
 		init->features[0] |= 1UL << KVM_ARM_VCPU_PMU_V3;
+	}
+
+	if (kvm->cfg.arch.nested_virt) {
+		if (!kvm__supports_extension(kvm, KVM_CAP_ARM_EL2))
+			die("EL2 virtualisation is not supported");
+		init->features[0] |= 1UL << KVM_ARM_VCPU_HAS_EL2;
 	}
 
 	/* Enable pointer authentication if available */
@@ -211,8 +246,18 @@ static int vcpu_configure_sve(struct kvm_cpu *vcpu)
 	return 0;
 }
 
+#define ID_AA64MMFR1_EL1	ARM64_SYS_REG(3, 0, 0, 7, 1)
+
 int kvm_cpu__configure_features(struct kvm_cpu *vcpu)
 {
+	if (vcpu->kvm->cfg.arch.nested_virt && vcpu->kvm->cfg.arch.e2h0) {
+		u64 val;
+
+		val = get_one_reg_u64(vcpu, ID_AA64MMFR1_EL1);
+		val &= ~(0xFULL << 8);
+		set_one_reg_u64(vcpu, ID_AA64MMFR1_EL1, val);
+	}
+
 	if (kvm__supports_extension(vcpu->kvm, KVM_CAP_ARM_SVE))
 		return vcpu_configure_sve(vcpu);
 

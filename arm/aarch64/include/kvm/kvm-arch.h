@@ -12,6 +12,7 @@ u64 kvm__arch_get_payload_region_size(struct kvm *kvm);
 
 int kvm__arch_get_ipa_limit(struct kvm *kvm);
 void kvm__arch_enable_mte(struct kvm *kvm);
+void kvm__arch_set_counter_offset(struct kvm *kvm);
 
 #define MAX_PAGE_SIZE	SZ_64K
 
