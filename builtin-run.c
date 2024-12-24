@@ -239,6 +239,10 @@ static int loglevel_parser(const struct option *opt, const char *arg, int unset)
 			"Set the verbosity level", loglevel_parser, NULL),\
 									\
 	OPT_GROUP("Kernel options:"),					\
+	OPT_STRING('x', "xen", &(cfg)->xen_filename, "xen",	\
+			"XEN to boot in virtual machine"),		\
+	OPT_STRING('y', "xenparams", &(cfg)->xen_cmdline, "xenparams",	\
+			"XEN command line arguments"),		\
 	OPT_STRING('k', "kernel", &(cfg)->kernel_filename, "kernel",	\
 			"Kernel to boot in virtual machine"),		\
 	OPT_STRING('i', "initrd", &(cfg)->initrd_filename, "initrd",	\
@@ -810,7 +814,12 @@ static struct kvm *kvm_cmd_run_init(int argc, const char **argv)
 	else
 		kvm_run_set_real_cmdline(kvm);
 
-	if (kvm->cfg.kernel_filename) {
+	if (kvm->cfg.xen_filename) {
+		pr_info("# %s run -x %s -m %Lu -c %d --name %s", KVM_BINARY_NAME,
+			kvm->cfg.xen_filename,
+			(unsigned long long)kvm->cfg.ram_size >> MB_SHIFT,
+			kvm->cfg.nrcpus, kvm->cfg.guest_name);
+	} else if (kvm->cfg.kernel_filename) {
 		pr_info("# %s run -k %s -m %Lu -c %d --name %s", KVM_BINARY_NAME,
 			kvm->cfg.kernel_filename,
 			(unsigned long long)kvm->cfg.ram_size >> MB_SHIFT,

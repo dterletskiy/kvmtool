@@ -99,6 +99,131 @@ void kvm__arch_init(struct kvm *kvm)
 
 #define FDT_ALIGN	SZ_2M
 #define INITRD_ALIGN	4
+bool kvm__arch_load_xen_image(struct kvm *kvm, int fd_kernel, int fd_initrd,
+				 const char *kernel_cmdline, int fd_xen, const char *xen_cmdline)
+{
+	void *pos, *kernel_end, *xen_end, *limit;
+	unsigned long guest_addr;
+	u64 payload_region_size;
+	ssize_t file_size;
+	u64 kernel_size;
+	u64 xen_size;
+
+	payload_region_size = kvm__arch_get_payload_region_size(kvm);
+	/*
+	 * Linux for arm requires the initrd and dtb to be mapped inside lowmem,
+	 * so we can't just place them at the top of memory.
+	 */
+	limit = kvm->ram_start + min(kvm->ram_size, payload_region_size);
+
+	kvm__arch_read_xen_header(kvm, fd_xen);
+	pos = kvm->ram_start + kvm__arch_get_xen_offset(kvm);
+	pr_debug("@TDA: kvm->ram_start=%p", kvm->ram_start);
+	pr_debug("@TDA: pos=%p", pos);
+	kvm->arch.xen_guest_start = host_to_guest_flat(kvm, pos);
+	if (!kvm->arch.xen_guest_start)
+		die("guest memory too small to contain the xen");
+	file_size = read_file(fd_xen, pos, limit - pos);
+	if (file_size < 0) {
+		if (errno == ENOMEM)
+			die("xen image too big to contain in guest memory.");
+
+		die_perror("xen read");
+	}
+
+	xen_size = kvm__arch_get_xen_size(kvm);
+	if (!xen_size || xen_size < (u64)file_size)
+		xen_size = file_size;
+	xen_end = pos + xen_size;
+	pr_debug("Loaded xen to 0x%llx (%llu bytes)",
+		 kvm->arch.xen_guest_start, xen_size);
+	pr_debug("@TDA: xen_end=%p", xen_end);
+
+
+
+	kvm__arch_read_kernel_header(kvm, fd_kernel);
+	pos = xen_end + kvm__arch_get_kern_offset(kvm);
+	pr_debug("@TDA: kvm->ram_start=%p", kvm->ram_start);
+	pr_debug("@TDA: pos=%p", pos);
+	kvm->arch.kern_guest_start = host_to_guest_flat(kvm, pos);
+	if (!kvm->arch.kern_guest_start)
+		die("guest memory too small to contain the kernel");
+	file_size = read_file(fd_kernel, pos, limit - pos);
+	if (file_size < 0) {
+		if (errno == ENOMEM)
+			die("kernel image too big to contain in guest memory.");
+
+		die_perror("kernel read");
+	}
+	kvm->arch.kernel_size = file_size;
+
+	kernel_size = kvm__arch_get_kernel_size(kvm);
+	if (!kernel_size || kernel_size < (u64)file_size)
+		kernel_size = file_size;
+	kernel_end = pos + kernel_size;
+	pr_debug("Loaded kernel to 0x%llx (%llu bytes)",
+		 kvm->arch.kern_guest_start, kernel_size);
+	pr_debug("@TDA: kernel_end=%p", kernel_end);
+
+	/*
+	 * Now load backwards from the end of memory so the kernel
+	 * decompressor has plenty of space to work with. First up is
+	 * the device tree blob...
+	 */
+	pos = limit;
+	pos -= (FDT_MAX_SIZE + FDT_ALIGN);
+	guest_addr = host_to_guest_flat(kvm, pos);
+	if (!guest_addr)
+		die("fdt too big to contain in guest memory");
+	guest_addr = ALIGN(guest_addr, FDT_ALIGN);
+	pos = guest_flat_to_host(kvm, guest_addr);
+	if (pos < kernel_end)
+		die("fdt overlaps with kernel image.");
+
+	kvm->arch.dtb_guest_start = guest_addr;
+	pr_debug("Placing fdt at 0x%llx - 0x%llx",
+		 kvm->arch.dtb_guest_start,
+		 host_to_guest_flat(kvm, limit - 1));
+	limit = pos;
+
+	/* ... and finally the initrd, if we have one. */
+	if (fd_initrd != -1) {
+		struct stat sb;
+		unsigned long initrd_start;
+
+		if (fstat(fd_initrd, &sb))
+			die_perror("fstat");
+
+		pos -= (sb.st_size + INITRD_ALIGN);
+		guest_addr = host_to_guest_flat(kvm, pos);
+		if (!guest_addr)
+			die("initrd too big to fit in the payload memory region");
+		guest_addr = ALIGN(guest_addr, INITRD_ALIGN);
+		pos = guest_flat_to_host(kvm, guest_addr);
+		if (pos < kernel_end)
+			die("initrd overlaps with kernel image.");
+
+		initrd_start = guest_addr;
+		file_size = read_file(fd_initrd, pos, limit - pos);
+		if (file_size == -1) {
+			if (errno == ENOMEM)
+				die("initrd too big to contain in guest memory.");
+
+			die_perror("initrd read");
+		}
+
+		kvm->arch.initrd_guest_start = initrd_start;
+		kvm->arch.initrd_size = file_size;
+		pr_debug("Loaded initrd to 0x%llx (%llu bytes)",
+			 kvm->arch.initrd_guest_start,
+			 kvm->arch.initrd_size);
+	} else {
+		kvm->arch.initrd_size = 0;
+	}
+
+	return true;
+}
+
 bool kvm__arch_load_kernel_image(struct kvm *kvm, int fd_kernel, int fd_initrd,
 				 const char *kernel_cmdline)
 {

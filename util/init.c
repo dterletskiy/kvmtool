@@ -35,8 +35,10 @@ int init_list__init(struct kvm *kvm)
 	int r = 0;
 	struct init_item *t;
 
+	pr_debug( "@TDA:" );
 	for (i = 0; i < ARRAY_SIZE(init_lists); i++)
 		hlist_for_each_entry(t, &init_lists[i], n) {
+			pr_debug( "@TDA: processing '%s'", t->fn_name );
 			r = t->init(kvm);
 			if (r < 0) {
 				pr_warning("Failed init: %s\n", t->fn_name);

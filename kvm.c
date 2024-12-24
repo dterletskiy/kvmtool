@@ -485,9 +485,17 @@ int kvm__init(struct kvm *kvm)
 	kvm__init_ram(kvm);
 
 	if (!kvm->cfg.firmware_filename) {
-		if (!kvm__load_kernel(kvm, kvm->cfg.kernel_filename,
-				kvm->cfg.initrd_filename, kvm->cfg.real_cmdline))
-			die("unable to load kernel %s", kvm->cfg.kernel_filename);
+		if (!kvm->cfg.xen_filename) {
+			if (!kvm__load_kernel(kvm, kvm->cfg.kernel_filename,
+					kvm->cfg.initrd_filename, kvm->cfg.real_cmdline))
+				die("unable to load kernel %s", kvm->cfg.kernel_filename);	
+		}
+		else {
+			if (!kvm__load_xen(kvm, kvm->cfg.kernel_filename,
+					kvm->cfg.initrd_filename, kvm->cfg.real_cmdline,
+					kvm->cfg.xen_filename, kvm->cfg.xen_cmdline))
+				die("unable to load xen %s", kvm->cfg.xen_filename);
+		}
 	}
 
 	if (kvm->cfg.firmware_filename) {
@@ -511,6 +519,43 @@ err:
 	return ret;
 }
 core_init(kvm__init);
+
+bool kvm__load_xen(struct kvm *kvm, const char *kernel_filename,
+		const char *initrd_filename, const char *kernel_cmdline,
+		const char *xen_filename, const char *xen_cmdline)
+{
+	bool ret;
+	int fd_kernel = -1, fd_initrd = -1, fd_xen = -1;
+
+	fd_xen = open(xen_filename, O_RDONLY);
+	if (fd_xen < 0)
+		die("Unable to open xen %s", xen_filename);
+
+	if (kernel_filename) {
+		fd_kernel = open(kernel_filename, O_RDONLY);
+		if (fd_kernel < 0)
+			die("Unable to open kernel %s", kernel_filename);
+	}
+
+	if (initrd_filename) {
+		fd_initrd = open(initrd_filename, O_RDONLY);
+		if (fd_initrd < 0)
+			die("Unable to open initrd %s", initrd_filename);
+	}
+
+	ret = kvm__arch_load_xen_image(kvm, fd_kernel, fd_initrd,
+					  kernel_cmdline, fd_xen, xen_cmdline);
+
+	if (initrd_filename)
+		close(fd_initrd);
+	if (kernel_filename)
+		close(fd_kernel);
+	close(fd_xen);
+
+	if (!ret)
+		die("%s is not a valid kernel image", kernel_filename);
+	return ret;
+}
 
 bool kvm__load_kernel(struct kvm *kvm, const char *kernel_filename,
 		const char *initrd_filename, const char *kernel_cmdline)

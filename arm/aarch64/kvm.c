@@ -8,6 +8,7 @@
 
 #include <kvm/util.h>
 
+static struct arm64_image_header *xen_header;
 static struct arm64_image_header *kernel_header;
 
 int vcpu_affinity_parser(const struct option *opt, const char *arg, int unset)
@@ -96,6 +97,43 @@ fail:
 	pr_debug("%s, using defaults", debug_str);
 }
 
+void kvm__arch_read_xen_header(struct kvm *kvm, int fd)
+{
+	const char *debug_str;
+	off_t cur_offset;
+	ssize_t size;
+
+	if (kvm->cfg.arch.aarch32_guest)
+		return;
+
+	xen_header = malloc(sizeof(*xen_header));
+	if (!xen_header)
+		return;
+
+	cur_offset = lseek(fd, 0, SEEK_CUR);
+	if (cur_offset == (off_t)-1 || lseek(fd, 0, SEEK_SET) == (off_t)-1) {
+		debug_str = "Failed to seek in xen image file";
+		goto fail;
+	}
+
+	size = xread(fd, xen_header, sizeof(*xen_header));
+	if (size < 0 || (size_t)size < sizeof(*xen_header))
+		die("Failed to read xen image header");
+
+	lseek(fd, cur_offset, SEEK_SET);
+
+	if (memcmp(&xen_header->magic, ARM64_IMAGE_MAGIC, sizeof(xen_header->magic))) {
+		debug_str = "XEN image magic not matching";
+		xen_header = NULL;
+		goto fail;
+	}
+
+	return;
+
+fail:
+	pr_debug("%s, using defaults", debug_str);
+}
+
 /*
  * Return the TEXT_OFFSET value that the guest kernel expects. Note
  * that pre-3.17 kernels expose this value using the native endianness
@@ -127,12 +165,45 @@ default_offset:
 	return 0x80000;
 }
 
+unsigned long long kvm__arch_get_xen_offset(struct kvm *kvm)
+{
+	const char *debug_str;
+
+	/* the 32bit xen offset is a well known value */
+	if (kvm->cfg.arch.aarch32_guest)
+		return 0x8000;
+
+	if (!xen_header) {
+		debug_str = "XEN header is missing";
+		goto default_offset;
+	}
+
+	if (!le64_to_cpu(xen_header->image_size)) {
+		debug_str = "Image size is 0";
+		goto default_offset;
+	}
+
+	return le64_to_cpu(xen_header->text_offset);
+
+default_offset:
+	pr_debug("%s, assuming TEXT_OFFSET to be 0x80000", debug_str);
+	return 0x80000;
+}
+
 u64 kvm__arch_get_kernel_size(struct kvm *kvm)
 {
 	if (kvm->cfg.arch.aarch32_guest || !kernel_header)
 		return 0;
 
 	return le64_to_cpu(kernel_header->image_size);
+}
+
+u64 kvm__arch_get_xen_size(struct kvm *kvm)
+{
+	if (kvm->cfg.arch.aarch32_guest || !xen_header)
+		return 0;
+
+	return le64_to_cpu(xen_header->image_size);
 }
 
 u64 kvm__arch_get_payload_region_size(struct kvm *kvm)
@@ -218,6 +289,14 @@ void kvm__arch_set_counter_offset(struct kvm *kvm)
 	if (ioctl(kvm->vm_fd, KVM_ARM_SET_COUNTER_OFFSET, &offset))
 		die_perror("KVM_ARM_SET_COUNTER_OFFSET");
 }
+
+static int kvm__arch_free_xen_header(struct kvm *kvm)
+{
+	free(xen_header);
+
+	return 0;
+}
+late_exit(kvm__arch_free_xen_header);
 
 static int kvm__arch_free_kernel_header(struct kvm *kvm)
 {

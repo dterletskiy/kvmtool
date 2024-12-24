@@ -131,29 +131,67 @@ static int setup_fdt(struct kvm *kvm)
 	/* /chosen */
 	_FDT(fdt_begin_node(fdt, "chosen"));
 
-	/* Pass on our amended command line to a Linux kernel only. */
-	if (kvm->cfg.firmware_filename) {
-		if (kvm->cfg.kernel_cmdline)
-			_FDT(fdt_property_string(fdt, "bootargs",
-						 kvm->cfg.kernel_cmdline));
-	} else if (kvm->cfg.real_cmdline) {
-		_FDT(fdt_property_string(fdt, "bootargs",
-					 kvm->cfg.real_cmdline));
-	}
-
 	_FDT(fdt_property_u64(fdt, "kaslr-seed", kvm->cfg.arch.kaslr_seed));
 	_FDT(fdt_property_string(fdt, "stdout-path", "serial0"));
 
 	/* Initrd */
-	if (kvm->arch.initrd_size != 0) {
-		u64 ird_st_prop = cpu_to_fdt64(kvm->arch.initrd_guest_start);
-		u64 ird_end_prop = cpu_to_fdt64(kvm->arch.initrd_guest_start +
-					       kvm->arch.initrd_size);
+	if (kvm->arch.xen_guest_start)
+	{
+		_FDT(fdt_property_string(fdt, "bootargs", kvm->cfg.xen_cmdline));
 
-		_FDT(fdt_property(fdt, "linux,initrd-start",
-				   &ird_st_prop, sizeof(ird_st_prop)));
-		_FDT(fdt_property(fdt, "linux,initrd-end",
-				   &ird_end_prop, sizeof(ird_end_prop)));
+		_FDT(fdt_property_cell(fdt, "#address-cells", 0x1));
+		_FDT(fdt_property_cell(fdt, "#size-cells", 0x1));
+
+		if (kvm->arch.kernel_size != 0) {
+			u32 kernel_reg_prop[]	= {
+				cpu_to_fdt32(kvm->arch.kern_guest_start),
+				cpu_to_fdt32(kvm->arch.kernel_size),
+			};
+			const char compatible_kernel[] = "xen,linux-zimage\0xen,multiboot-module";
+
+			_FDT(fdt_begin_node(fdt, "module@0"));
+			_FDT(fdt_property(fdt, "compatible", compatible_kernel, sizeof(compatible_kernel)));
+			_FDT(fdt_property(fdt, "reg", kernel_reg_prop, sizeof(kernel_reg_prop)));
+			if(kvm->cfg.kernel_cmdline)
+				_FDT(fdt_property_string(fdt, "bootargs", kvm->cfg.kernel_cmdline));
+			_FDT(fdt_end_node(fdt));
+		}
+
+		if (kvm->arch.initrd_size != 0) {
+			u32 initrd_reg_prop[]	= {
+				cpu_to_fdt32(kvm->arch.initrd_guest_start),
+				cpu_to_fdt32(kvm->arch.initrd_size),
+			};
+			const char compatible_initrd[] = "xen,linux-initrd\0xen,multiboot-module";
+
+			_FDT(fdt_begin_node(fdt, "module@1"));
+			_FDT(fdt_property(fdt, "compatible", compatible_initrd, sizeof(compatible_initrd)));
+			_FDT(fdt_property(fdt, "reg", initrd_reg_prop, sizeof(initrd_reg_prop)));
+			_FDT(fdt_end_node(fdt));
+		}
+	}
+	else
+	{
+		/* Pass on our amended command line to a Linux kernel only. */
+		if (kvm->cfg.firmware_filename) {
+			if (kvm->cfg.kernel_cmdline)
+				_FDT(fdt_property_string(fdt, "bootargs",
+							 kvm->cfg.kernel_cmdline));
+		} else if (kvm->cfg.real_cmdline) {
+			_FDT(fdt_property_string(fdt, "bootargs",
+						 kvm->cfg.real_cmdline));
+		}
+
+		if (kvm->arch.initrd_size != 0) {
+			u64 ird_st_prop = cpu_to_fdt64(kvm->arch.initrd_guest_start);
+			u64 ird_end_prop = cpu_to_fdt64(kvm->arch.initrd_guest_start +
+						       kvm->arch.initrd_size);
+
+			_FDT(fdt_property(fdt, "linux,initrd-start",
+					   &ird_st_prop, sizeof(ird_st_prop)));
+			_FDT(fdt_property(fdt, "linux,initrd-end",
+					   &ird_end_prop, sizeof(ird_end_prop)));
+		}
 	}
 	_FDT(fdt_end_node(fdt));
 

@@ -102,7 +102,9 @@ struct kvm_arch {
 	 * Guest addresses for memory layout.
 	 */
 	u64	memory_guest_start;
+	u64	xen_guest_start;
 	u64	kern_guest_start;
+	u64	kernel_size;
 	u64	initrd_guest_start;
 	u64	initrd_size;
 	u64	dtb_guest_start;
